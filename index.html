@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Warehouse Agent</title>
+<style>
+  :root{--ink:#1f2430;--mute:#6b7280;--card:rgba(255,255,255,.93)}
+  html,body{margin:0;height:100%;overflow:hidden;background:#dfe3e8;font:13px/1.35 system-ui,sans-serif;color:var(--ink)}
+  canvas{display:block}
+  .card{position:fixed;background:var(--card);border-radius:14px;box-shadow:0 2px 12px #0002;backdrop-filter:blur(6px);box-sizing:border-box}
+  #head{left:16px;top:16px;right:300px;padding:10px 16px}
+  #head h1{margin:0;font-size:15px}#head h1 span{font-weight:400;color:var(--mute)}
+  #head p{margin:2px 0 0;color:var(--mute)}
+  #stats{right:16px;top:16px;width:270px;padding:10px 16px;display:flex;gap:18px}
+  #stats small{display:block;color:var(--mute);font-size:11px}#stats b{font-size:18px}
+  .side{top:96px;bottom:126px;width:290px;padding:12px 14px;overflow:auto}
+  #feed{left:16px}#hist{right:16px}
+  .side h2{margin:0 0 8px;font-size:14px}
+  .row{display:flex;gap:9px;padding:7px 0;border-top:1px solid #0000000d}
+  .av{flex:none;width:28px;height:28px;border-radius:50%;color:#fff;font-weight:700;display:grid;place-items:center;font-size:12px}
+  .row i{font-style:normal;color:var(--mute);font:11px ui-monospace,monospace;margin-left:4px}
+  .row small{display:block;color:var(--mute)}
+  .chip{float:right;font-size:11px;border:1px solid #0002;border-radius:10px;padding:0 7px;margin-left:6px}
+  .chip.on{color:#15803d;border-color:#15803d66}
+  #cards{left:16px;right:16px;bottom:12px;display:flex;gap:10px;padding:10px;overflow-x:auto}
+  .ac{flex:none;width:190px;padding:6px 8px;border-radius:10px;background:#fff;box-shadow:0 1px 4px #0002}
+  .ac b{display:flex;align-items:center;gap:6px}.ac small{display:block;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #ui{position:fixed;inset:0;pointer-events:none}
+  .label{position:absolute;transform:translate(-50%,-100%);text-align:center;white-space:nowrap}
+  .label b{color:#fff;border-radius:9px;padding:2px 9px;font-size:11px;box-shadow:0 1px 3px #0004}
+  .label div{display:block;background:#fff;border-radius:10px;padding:4px 9px;margin:0 auto 4px;width:max-content;max-width:170px;white-space:normal;box-shadow:0 1px 4px #0003;font-size:11px}
+  @media(max-width:1000px){.side{display:none}#head{right:16px;top:70px}#stats{left:16px;right:16px;width:auto}}
+</style>
+<div id="ui"></div>
+<div id="head" class="card"><h1>Warehouse Agent <span>· Gudang Joko</span></h1><p id="sub">…</p></div>
+<div id="stats" class="card"><div><small>Subagent sesi ini</small><b id="s1">0</b></div><div><small>Aktif sekarang</small><b id="s2">0</b></div></div>
+<div id="feed" class="card side"><h2>Aktivitas langsung</h2><div id="feedList"></div></div>
+<div id="hist" class="card side"><h2>Riwayat subagent</h2><div id="histList"></div></div>
+<div id="cards" class="card"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
+
+const NAMES = ["Budi","Sari","Agus","Rina","Nina","Fajar","Dedi","Wati","Eko","Tini"];
+const COLORS = [0x5b5fc7,0x3b82f6,0x10b981,0xf59e0b,0xec4899,0xd9822b,0xb45309,0x8b5cf6,0x14b8a6,0xef4444,0x64748b];
+const SKIN = [0xf2c9a0, 0xe0ac80, 0xc68642, 0x8d5524, 0xffdbac], PANTS = [0x475569, 0x1e3a8a, 0x3f3f46, 0x78350f];
+const HELM = [0xfacc15, 0xf97316, 0xef4444, 0x3b82f6, 0x22c55e, 0xf5f5f4], HAIR = [0x3b2f2f, 0x1c1917, 0x7c2d12, 0xa16207];
+const ROLE = { Explore: "Scout", Plan: "Planner", "general-purpose": "Packer", general: "Packer", "claude-code-guide": "Guide" };
+const roleOf = t => ROLE[t] || String(t).split(":").pop().slice(0, 12);
+const hex = c => "#" + c.toString(16).padStart(6, "0");
+const $ = id => document.getElementById(id);
+const V = (x, y, z) => new THREE.Vector3(x, y, z);
+
+// ---------- scene ----------
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe3e8);
+const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 120); cam.position.set(0, 13, 18);
+const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap; renderer.toneMapping = THREE.ACESFilmicToneMapping;
+document.body.prepend(renderer.domElement);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+const controls = new OrbitControls(cam, renderer.domElement); controls.target.set(0, 0.5, -0.5); controls.maxPolarAngle = Math.PI / 2.05; controls.enableDamping = true;
+const sun = new THREE.DirectionalLight(0xfff1dc, 1.6); sun.position.set(6, 12, 8); sun.castShadow = true; sun.shadow.radius = 4; sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -20, right: 20, top: 20, bottom: -20 }); scene.add(sun);
+
+const mat = c => new THREE.MeshStandardMaterial({ color: c, roughness: 0.7 });
+const box = (w, h, d, color, x, y, z, parent = scene, r = 0.06) => {
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, Math.min(r, w / 2, h / 2, d / 2)), mat(color));
+  m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent.add(m); return m;
+};
+const ground = new THREE.Mesh(new THREE.CircleGeometry(30, 48), mat(0xb8c4b0));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+
+// ---------- gudang ----------
+const DOCK_IN = k => -8 + (k % 3) * 3.8, DOCK_OUT = k => 3.2 + (k % 3) * 3.9; // ponytail: truk bisa saling lewat kalau slot sama; tambah jalur kalau ramai
+const shelf = k => ({ x: -5.7 + Math.floor((k % 8) / 2) * 2.3 + (k % 2 ? 0.55 : -0.55), y: 0.41 + (Math.floor(k / 8) % 2) + 0.25 }); // 16 slot rak
+const pack = k => { const i = k % 6, front = i < 3, x = 4.8 + (i % 3) * 1.2; return { stand: V(x, 0.2, front ? -0.3 : -4.5), box: V(x, 1.35, front ? -1.4 : -3.4), face: V(x, 0, front ? -10 : 10) }; };
+
+box(24, 0.2, 11, 0xe7e5df, 0, 0.1, -3, scene, 0.04);              // lantai
+box(24, 3.2, 0.3, 0xcfd4da, 0, 1.6, -8.6);                         // dinding belakang
+box(60, 0.06, 3.4, 0x4b5563, 0, 0.03, 4);                          // jalan truk
+for (let k = 0; k < 3; k++) [DOCK_IN(k), DOCK_OUT(k)].forEach(x => box(3.2, 0.02, 0.12, 0xfacc15, x, 0.21, 2.35, scene, 0.01)); // garis dok
+[0.35, 1.35, 2.35].forEach(y => box(9.2, 0.12, 1.1, 0x64748b, -2.25, y, -6.2));          // rak
+for (let i = 0; i < 5; i++) box(0.12, 2.4, 1.1, 0x334155, -6.85 + i * 2.3, 1.2, -6.2);
+[-1.4, -3.4].forEach(z => box(4.2, 0.9, 0.9, 0xa8815a, 6, 0.65, z));                      // meja packing
+
+function makeBox() { const b = box(0.5, 0.5, 0.5, 0xc89b5e, 0, 0, 0); b.tape = box(0.12, 0.02, 0.52, 0xfde68a, 0, 0.26, 0, b, 0.005); b.tape.visible = false; return b; }
+
+const trucks = [];
+const wheel = (g, x, z, r = 0.28) => { const w = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 0.2, 16), mat(0x1f2937)); w.rotation.z = Math.PI / 2; w.position.set(x, r, z); w.castShadow = true; g.add(w); };
+function makeTruck(color, x) {
+  const g = new THREE.Group(); g.position.set(x, 0, 3.9); scene.add(g);
+  box(1.5, 0.2, 3, 0x374151, 0, 0.45, -0.2, g); box(1.5, 1.1, 1, color, 0, 0.95, 1.5, g); box(1.3, 0.4, 0.05, 0x9db4c0, 0, 1.15, 2.01, g);
+  [[-0.78, -1], [0.78, -1], [-0.78, 1.3], [0.78, 1.3]].forEach(([wx, wz]) => wheel(g, wx, wz));
+  const t = { g, tx: x }; trucks.push(t); return t;
+}
+
+// forklift = aktivitas Joko (sesi utama): bolak-balik membawa kotak ke rak selama Joko aktif
+function makeForklift() {
+  const g = new THREE.Group(); g.position.set(-10.5, 0, -3.6); scene.add(g);
+  box(1, 0.6, 1.4, 0xfacc15, 0, 0.5, -0.1, g); box(1, 0.06, 0.9, 0x374151, 0, 1.55, -0.2, g);
+  [-0.42, 0.42].forEach(x => { box(0.06, 1, 0.06, 0x374151, x, 1.05, -0.6, g); box(0.1, 1.5, 0.1, 0x64748b, x * 0.6, 0.9, 0.7, g); box(0.1, 0.05, 1, 0x64748b, x * 0.6, 0.15, 1.25, g); });
+  [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]].forEach(([wx, wz]) => wheel(g, wx, wz, 0.2));
+  const lb = makeBox(); g.add(lb); lb.position.set(0, 0.43, 1.25); lb.visible = false;
+  const t = { g, tx: g.position.x, lb }; trucks.push(t); return t;
+}
+
+// ---------- orang ----------
+function makePerson(color, seed = 0) {
+  const g = new THREE.Group(), skin = SKIN[seed % 5], pants = PANTS[seed % 4];
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.25, 0.42, 6, 12), mat(color)); body.position.y = 0.85; body.castShadow = true; g.add(body);
+  const head = new THREE.Group(); head.position.y = 1.45; g.add(head);
+  const face = new THREE.Mesh(new THREE.SphereGeometry(0.26, 20, 16), mat(skin)); face.castShadow = true; head.add(face);
+  const hat = seed % 3, hatColor = [HELM[seed % 6], HELM[(seed + 2) % 6], HAIR[seed % 4]][hat]; // helm / topi / rambut saja
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.29, 20, 12, 0, Math.PI * 2, 0, Math.PI * (hat === 2 ? 0.45 : 0.5)), mat(hatColor)); helmet.position.y = hat === 2 ? 0.03 : 0.04; head.add(helmet);
+  if (hat === 1) box(0.3, 0.03, 0.2, hatColor, 0, 0.09, 0.3, head, 0.01);
+  [-0.09, 0.09].forEach(x => { const e = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 8), mat(0x222222)); e.position.set(x, 0, 0.24); head.add(e); });
+  const limb = (x, y, c) => { const p = new THREE.Group(); p.position.set(x, y, 0); box(0.13, 0.5, 0.13, c, 0, -0.25, 0, p, 0.06); g.add(p); return p; };
+  return { g, head, armL: limb(-0.32, 1.1, skin), armR: limb(0.32, 1.1, skin), legL: limb(-0.11, 0.5, pants), legR: limb(0.11, 0.5, pants) };
+}
+
+// ---------- state ----------
+const people = {}, jobs = {}, nameOf = {}; let leadOn = false, seq = 1; // seq: tiap agent baru dapat nama & tampilan berbeda
+const time = t => new Date(t).toLocaleTimeString("id-ID", { hour12: false });
+const esc = s => String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const av = (name, c) => `<span class="av" style="background:${hex(c)}">${name[0]}</span>`;
+
+function spawn(id, name, color, r, at, seed) {
+  const p = makePerson(color, seed); p.g.position.copy(at); p.g.scale.setScalar(0.01); scene.add(p.g);
+  p.el = document.createElement("span"); p.el.className = "label"; p.el.innerHTML = `<div hidden></div><b style="background:${hex(color)}">${name} · ${r}</b>`; $("ui").append(p.el);
+  p.target = at.clone(); p.face = V(at.x, 0, 10); p.mode = "idle"; p.leaving = false;
+  return people[id] = p;
+}
+const bubble = (p, t) => { const d = p.el.firstChild; d.hidden = !t; if (t) d.textContent = t; };
+
+// async/await = alur kerja satu pekerja: truk datang → rak → packing → truk pergi
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const walk = (p, v) => new Promise(r => { p.target.copy(v); p.arrive = r; });
+const drive = (t, x) => new Promise(r => { t.g.rotation.y = x > t.g.position.x ? Math.PI / 2 : -Math.PI / 2; t.tx = x; t.arrive = r; });
+const dispose = o => { scene.remove(o); o.traverse(c => { c.geometry?.dispose(); c.material?.dispose(); }); };
+const leave = async (t, x) => { await drive(t, x); dispose(t.g); trucks.splice(trucks.indexOf(t), 1); };
+const carry = (p, b) => { p.g.add(b); b.position.set(0, 0.95, 0.5); p.mode = "carry"; };
+const put = (p, b, v) => { scene.add(b); b.position.copy(v); p.mode = "idle"; };
+
+async function run(j) {
+  const k = j.k, b = makeBox(), say = t => { j.stage = t; if (j.p) bubble(j.p, t); };
+  const inT = makeTruck(0x3b82f6, -24); inT.g.add(b); b.position.set(0, 0.8, -0.4);
+  j.stage = "Menunggu truk"; await drive(inT, DOCK_IN(k));
+  const w = j.p = spawn(j.id, j.name, j.color, j.role, V(DOCK_IN(k), 0.2, 2.3), j.seed);
+  say("📦 Barang datang"); await sleep(900); carry(w, b); leave(inT, -24);
+  const s = shelf(k); say("🗄️ Menata di rak");
+  await walk(w, V(s.x, 0.2, -5.1)); w.face.set(s.x, 0, -10); await sleep(500); put(w, b, V(s.x, s.y, -6.2)); await sleep(1200);
+  const pk = pack(k); say("🧰 Ambil dari rak"); carry(w, b); await walk(w, pk.stand);
+  w.face.copy(pk.face); put(w, b, pk.box); w.mode = "pack"; say("📦 Packing: " + j.desc);
+  while (!j.done) { await sleep(500); bubble(w, "📦 Packing: " + j.desc); }
+  b.tape.visible = true; say("✅ Siap kirim"); await sleep(900); carry(w, b);
+  const outT = makeTruck(0xf97316, 24), arrive = drive(outT, DOCK_OUT(k)); say("🚚 Ke truk kirim");
+  await Promise.all([walk(w, V(DOCK_OUT(k), 0.2, 2.3)), arrive]); w.face.set(DOCK_OUT(k), 0, 10); await sleep(400);
+  outT.g.add(b); b.position.set(0, 0.8, -0.4); w.mode = "idle"; say("Beres! 🚚"); await sleep(900);
+  leave(outT, 24); w.leaving = true; w.target.copy(w.g.position); j.stage = "Selesai";
+}
+
+async function tick() {
+  let s; try { s = await (await fetch("/api/state")).json(); } catch { return; }
+  const agents = s.agents || [], running = agents.filter(a => !a.done), leadActive = s.lead && Date.now() - s.lead.at < 30000;
+
+  running.forEach(a => {
+    if (jobs[a.id] && !jobs[a.id].over) { Object.assign(jobs[a.id], { done: false, desc: a.desc || a.type }); return; }
+    const used = new Set(Object.values(jobs).filter(j => !j.over).map(j => j.k)); let k = 0; while (used.has(k)) k++;
+    if (k >= 6) return; // antre: tunggu slot kosong (meja packing ada 6)
+    const seed = seq++, j = jobs[a.id] = { id: a.id, k, seed, role: roleOf(a.type), name: nameOf[a.id] = NAMES[seed % NAMES.length], color: COLORS[1 + seed % 10], desc: a.desc || a.type, done: false, over: false, stage: "" };
+    run(j).finally(() => j.over = true);
+  });
+  agents.forEach((a, i) => { nameOf[a.id] ??= NAMES[i % NAMES.length]; if (a.done && jobs[a.id]) jobs[a.id].done = true; });
+  Object.values(jobs).forEach(j => { if (!j.over && !agents.some(a => a.id === j.id)) j.done = true; }); // agent hilang dari state: anggap selesai
+
+  // Joko (sesi utama) jaga di depan gudang
+  if (leadActive) {
+    const p = people.joko || spawn("joko", "Joko", COLORS[0], "Ketua", V(-12, 0.2, 0.6));
+    p.leaving = false; p.target.set(0.2, 0.2, 1.2); bubble(p, s.lead.text || "Bekerja");
+  } else if (people.joko) { people.joko.leaving = true; people.joko.target.set(-12, 0.2, 0.6); bubble(people.joko, "Beres!"); }
+
+  const active = running.map(a => ({ name: nameOf[a.id], color: jobs[a.id]?.color ?? COLORS[0], text: a.desc || a.type, sub: `${roleOf(a.type)} · ${jobs[a.id]?.stage || "Antre"}` }));
+  if (leadActive) active.unshift({ name: "Joko", color: COLORS[0], text: s.lead.text || "Bekerja", sub: "Sesi utama" });
+  const n = active.length, queued = running.filter(a => !jobs[a.id]).length; leadOn = !!leadActive;
+  $("sub").textContent = (n === 0 ? "Gudang sepi, semua istirahat 😴" : `${n} agent bekerja: ada barang masuk, packing, dan kirim 📦`) + (queued ? ` · ${queued} antre` : "") + (s.otherSessions ? ` · +${s.otherSessions} sesi lain` : "");
+  $("s1").textContent = agents.length; $("s2").textContent = n;
+  $("feedList").innerHTML = (s.events || []).slice().reverse().map(e => `<div class="row">${av("Joko", COLORS[0])}<div><b>Joko</b><i>${time(e.at)}</i><br>${esc(e.text)}</div></div>`).join("") || "<small>Belum ada aktivitas</small>";
+  $("histList").innerHTML = agents.slice().reverse().map(a => `<div class="row">${av(nameOf[a.id], COLORS[1 + (NAMES.indexOf(nameOf[a.id]) + 10) % 10])}<div style="flex:1"><span class="chip ${a.done ? "" : "on"}">● ${a.done ? "Selesai" : "Bekerja"}</span><b>${esc(a.desc || a.type)}</b><small>${nameOf[a.id]} · ${esc(a.type)} · ${time(a.at)} · ${Math.max(1, Math.round(((a.doneAt || Date.now()) - a.at) / 60000))} mnt</small></div></div>`).join("") || "<small>Belum ada subagent</small>";
+  $("cards").innerHTML = active.map(a => `<div class="ac"><b>${av(a.name, a.color)}${a.name} <span class="chip on" style="float:none">● Bekerja</span></b><b style="display:block;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(a.text)}</b><small>${esc(a.sub)}</small></div>`).join("") || "<small style='padding:6px'>Tidak ada agent aktif</small>";
+}
+const lift = makeForklift();
+(async () => { for (;;) {
+  if (!leadOn) { lift.lb.visible = false; await drive(lift, -10.5); while (!leadOn) await sleep(500); }
+  await drive(lift, -5.5); lift.lb.visible = true; await sleep(800);
+  await drive(lift, 1.5); lift.lb.visible = false; await sleep(800);
+} })();
+tick(); setInterval(tick, 1500);
+
+// ---------- loop ----------
+const clock = new THREE.Clock(), v = new THREE.Vector3();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta(), t = clock.elapsedTime;
+  for (const tr of trucks) {
+    const dx = tr.tx - tr.g.position.x;
+    if (Math.abs(dx) > 0.05) tr.g.position.x += Math.sign(dx) * Math.min(Math.abs(dx), 7 * dt);
+    else if (tr.arrive) { const r = tr.arrive; tr.arrive = null; r(); }
+  }
+  for (const id in people) {
+    const p = people[id], d = v.subVectors(p.target, p.g.position), dist = d.length(), moving = dist > 0.05;
+    if (moving) { p.g.position.addScaledVector(d, Math.min(1, 2.2 * dt / dist)); p.g.rotation.y = Math.atan2(d.x, d.z); }
+    else {
+      const want = Math.atan2(p.face.x - p.g.position.x, p.face.z - p.g.position.z); p.g.rotation.y += Math.atan2(Math.sin(want - p.g.rotation.y), Math.cos(want - p.g.rotation.y)) * 0.1;
+      if (p.arrive) { const r = p.arrive; p.arrive = null; r(); }
+    }
+    const sc = p.g.scale.x, goal = p.leaving && dist < 0.4 ? 0.01 : 1;
+    p.g.scale.setScalar(Math.max(0.01, sc + (goal - sc) * Math.min(1, dt * 5)));
+    const sw = moving ? Math.sin(t * 10) * 0.7 : 0, ph = id.length;
+    p.legL.rotation.x = sw; p.legR.rotation.x = -sw;
+    p.armL.rotation.x = p.armR.rotation.x = p.mode === "carry" ? -1.2 : 0;
+    if (p.mode !== "carry") {
+      p.armL.rotation.x = moving ? -sw : p.mode === "pack" ? -0.9 + Math.sin(t * 9 + ph) * 0.4 : 0;
+      p.armR.rotation.x = moving ? sw : p.mode === "pack" ? -0.9 - Math.sin(t * 9 + ph) * 0.4 : 0;
+    }
+    p.head.rotation.x = !moving && p.mode === "pack" ? 0.3 : 0;
+    p.g.position.y = 0.2 + (moving ? Math.abs(Math.sin(t * 10)) * 0.05 : 0);
+    if (p.leaving && p.g.scale.x < 0.05) { p.el.remove(); dispose(p.g); delete people[id]; continue; }
+    v.copy(p.g.position).setY(1.9 * p.g.scale.x).project(cam);
+    p.el.style.left = (v.x * 0.5 + 0.5) * innerWidth + "px"; p.el.style.top = (-v.y * 0.5 + 0.5) * innerHeight + "px";
+    p.el.style.display = p.g.scale.x < 0.5 ? "none" : "";
+  }
+  controls.update(); renderer.render(scene, cam);
+});
+addEventListener("resize", () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script>
