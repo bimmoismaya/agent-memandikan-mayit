@@ -1,4 +1,4 @@
-// Kantor Agent mini: baca transkrip Claude Code (read-only), sajikan state JSON + index.html (tema Warehouse).
+// Kantor Agent mini: baca transkrip Claude Code (read-only), sajikan state JSON + index.html (tema pemandian jenazah).
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";
@@ -30,25 +30,37 @@ function state() {
   }
   const files = recentFiles();
   if (!files.length) return { lead: null, agents: [], otherSessions: 0 };
-  const { p, project } = files[0]; // ponytail: hanya sesi terbaru, sesi lain cuma dihitung
+  const project = files[0].project; // ponytail: semua sesi aktif (10 menit) digabung; lead = sesi terbaru
   const uses = new Map(), done = new Map(), events = [];
   let lead = { tool: null, at: 0 };
-  for (const line of fs.readFileSync(p, "utf8").split("\n")) {
-    if (!line) continue;
-    let e; try { e = JSON.parse(line); } catch { continue; }
-    const c = e.message?.content;
-    if (!Array.isArray(c) || e.isSidechain) continue;
-    const at = Date.parse(e.timestamp) || 0;
-    for (const b of c) {
-      if (b.type === "tool_use") {
-        lead = { tool: b.name, at, text: describe(b) };
-        events.push({ at, text: lead.text });
-        if (b.name === "Agent" || b.name === "Task")
-          uses.set(b.id, { id: b.id, type: b.input?.subagent_type || "general", desc: String(b.input?.description || "").slice(0, 60), at });
-      } else if (b.type === "tool_result") done.set(b.tool_use_id, at);
+  for (const { p } of files) {
+    let raw; try { raw = fs.readFileSync(p, "utf8"); } catch { continue; }
+    for (const line of raw.split("\n")) {
+      if (!line) continue;
+      let e; try { e = JSON.parse(line); } catch { continue; }
+      const at = Date.parse(e.timestamp) || 0;
+      // agent async: tool_result hanya "launched"; selesai = <task-notification> (di queue-operation / pesan user berupa string)
+      const txt = typeof e.message?.content === "string" ? e.message.content : e.type === "queue-operation" ? e.content : null;
+      if (typeof txt === "string" && txt.includes("<task-notification>")) {
+        const id = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(txt)?.[1], st = /<status>([^<]+)<\/status>/.exec(txt)?.[1];
+        if (id && st && st !== "running" && !done.has(id)) done.set(id, at);
+        continue;
+      }
+      const c = e.message?.content;
+      if (!Array.isArray(c) || e.isSidechain) continue;
+      for (const b of c) {
+        if (b.type === "tool_use") {
+          const text = describe(b);
+          if (at >= lead.at) lead = { tool: b.name, at, text };
+          events.push({ at, text });
+          if (b.name === "Agent" || b.name === "Task")
+            uses.set(b.id, { id: b.id, type: b.input?.subagent_type || "general", desc: String(b.input?.description || "").slice(0, 60), at });
+        } else if (b.type === "tool_result" && !JSON.stringify(b.content ?? "").includes("Async agent launched")) done.set(b.tool_use_id, at);
+      }
     }
   }
-  const agents = [...uses.values()].map(a => ({ ...a, done: done.has(a.id), doneAt: done.get(a.id) })).slice(-12);
+  events.sort((x, y) => x.at - y.at);
+  const agents = [...uses.values()].sort((x, y) => x.at - y.at).map(a => ({ ...a, done: done.has(a.id), doneAt: done.get(a.id) })).slice(-12);
   return { lead, agents, events: events.slice(-40), project, otherSessions: files.length - 1 };
 }
 

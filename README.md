@@ -1,17 +1,17 @@
-# Warehouse Agent
+# Pemandian Jenazah Agent
 
-Visualisasi 3D aktivitas Claude Code sebagai gudang. Gerakannya dibaca dari transkrip lokal Claude Code (`~/.claude/projects`), read-only, tanpa data karangan.
+Visualisasi 3D aktivitas Claude Code sebagai ruang pemandian jenazah (digambarkan sopan: jenazah selalu tertutup kain). Gerakannya dibaca dari transkrip lokal Claude Code (`~/.claude/projects`), read-only, tanpa data karangan.
 
-Setiap subagent yang berjalan = satu pekerjaan di gudang:
+Setiap subagent yang berjalan = satu pekerjaan di ruang pemandian:
 
 | Tahap | Yang terjadi |
 |---|---|
-| Subagent mulai | Truk biru datang membawa kotak, worker menurunkannya |
-| Bekerja | Kotak ditata di rak, lalu dibawa ke meja dan dipacking |
-| Subagent selesai | Kotak diselotip, dimuat ke truk oranye, truk pergi, "Beres!" |
-| Tidak ada agent | Gudang sepi |
+| Subagent mulai | Mobil putih datang membawa jenazah (berkain), worker membawanya ke dipan |
+| Bekerja | Worker mengambil perlengkapan di rak, lalu memandikan (air dituang) tanpa balon dialog |
+| Subagent selesai | Dikafani (kain putih + tali), dimuat ke mobil hijau, mobil pergi |
+| Tidak ada agent | Ruang sepi |
 
-Sesi utama **Joko** (ada aktivitas dalam 30 detik terakhir) berjaga di depan gudang dengan bubble aktivitasnya. Worker diberi nama Budi, Sari, Agus, dst. sesuai urutan slot.
+Sesi utama **Joko** (ada aktivitas dalam 30 detik terakhir) berjaga di depan ruangan dan tidak pernah pergi. Kalau ada jenazah yang sedang dimandikan, Joko ikut membantu di dipan itu. Worker diberi nama Budi, Sari, Agus, dst. sesuai urutan slot.
 
 ## Kebutuhan
 - **Node.js 18 atau lebih baru.** Tanpa `npm install`, tidak ada dependensi.
@@ -25,7 +25,7 @@ Sesi utama **Joko** (ada aktivitas dalam 30 detik terakhir) berjaga di depan gud
    node server.mjs
    ```
 2. Buka http://127.0.0.1:8788 di browser.
-3. Pakai Claude Code seperti biasa di project mana pun. Gudang ikut bergerak.
+3. Pakai Claude Code seperti biasa di project mana pun. Ruang pemandian ikut bergerak.
 
 Ganti port bila 8788 terpakai:
 ```
@@ -59,9 +59,9 @@ Get-NetTCPConnection -LocalPort 8788 -State Listen | % { Stop-Process -Id $_.Own
 
 ## Masalah umum
 - **Halaman kosong / tanpa 3D:** cek koneksi internet (CDN) dan pastikan WebGL aktif di browser.
-- **Gudang selalu sepi:** pastikan Claude Code sedang dipakai dan `~/.claude/projects` ada. Cek `http://127.0.0.1:8788/api/state` dan lihat apakah `lead` terisi.
+- **Ruang selalu sepi:** pastikan Claude Code sedang dipakai dan `~/.claude/projects` ada. Cek `http://127.0.0.1:8788/api/state` dan lihat apakah `lead` terisi.
 - **`EADDRINUSE`:** port terpakai, ganti dengan `PORT=...`.
 - **Perubahan tidak terlihat:** tekan `Ctrl+F5`. Setelah mengubah `server.mjs`, jalankan ulang servernya.
 
 ## Mengubah tampilan
-Pembuatan pekerjaan dari state ada di fungsi `tick()` di `index.html`, sedangkan bentuk benda ada di bagian `gudang`, `makeTruck`, dan `makePerson`. Alur satu pekerjaan ada di fungsi `run()`. Server tidak perlu disentuh untuk mengganti tema.
+Pembuatan pekerjaan dari state ada di fungsi `tick()` di `index.html`, sedangkan bentuk benda ada di bagian `ruang pemandian`, `makeTruck`, dan `makePerson`. Alur satu pekerjaan ada di fungsi `run()`. Server tidak perlu disentuh untuk mengganti tema.
